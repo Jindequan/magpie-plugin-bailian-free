@@ -1,0 +1,33 @@
+{
+  "name": "magpie-plugin-bailian-free",
+  "version": "0.1.0",
+  "description": "Magpie & OpenCode provider plugin for Alibaba Cloud Bailian's (阿里云百炼) new-user free quota",
+  "type": "module",
+  "main": "./index.mjs",
+  "exports": "./index.mjs",
+  "files": [
+    "index.mjs",
+    "console.mjs",
+    "bl.mjs",
+    "login.mjs",
+    "models.mjs",
+    "README.md"
+  ],
+  "keywords": [
+    "magpie",
+    "opencode",
+    "opencode-plugin",
+    "bailian",
+    "dashscope",
+    "aliyun",
+    "qwen"
+  ],
+  "license": "MIT",
+  "magpie": {
+    "icon": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23FF6A00'/%3E%3Ctext x='32' y='43' font-size='30' text-anchor='middle' fill='white' font-family='sans-serif' font-weight='600'%3E百%3C/text%3E%3C/svg%3E"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Jindequan/magpie-plugin-bailian-free.git"
+  }
+}
