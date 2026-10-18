@@ -25,15 +25,24 @@ paid.
 
 ## Install
 
-No npm; magpie installs straight from this git repository:
+No npm; magpie installs straight from this git repository. Any one of
+these exact forms works — a bare `github.com/…` address (no scheme, no
+`github:` prefix) is read as an npm package name and refused:
 
 ```sh
 magpie plugin add Jindequan/magpie-plugin-bailian-free
+magpie plugin add github:Jindequan/magpie-plugin-bailian-free
+magpie plugin add https://github.com/Jindequan/magpie-plugin-bailian-free
 ```
 
-(the same works as `github:Jindequan/magpie-plugin-bailian-free` or the
-full `https://github.com/Jindequan/magpie-plugin-bailian-free` URL), then
-sign in from the app's Plugins page or:
+The app's Plugins page takes the same forms in its add box. On macOS the
+`magpie` command is the app's own binary — link it once:
+
+```sh
+ln -sf /Applications/magpie.app/Contents/MacOS/magpie /opt/homebrew/bin/magpie
+```
+
+Then sign in from the app's Plugins page or:
 
 ```sh
 magpie plugin login bailian-free
