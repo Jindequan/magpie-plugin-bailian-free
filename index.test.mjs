@@ -305,7 +305,7 @@ test("usage lists the grants as windows from the console", async () => {
   const usage = await h.auth.usage(async () => ({ type: "oauth", token: "tok", source: "browser", accountId: "测试账号" }))
   expect(usage.plan).toBe("新用户免费额度")
   expect(usage.user).toBe("测试账号")
-  expect(usage.balance).toBe("1 个模型有免费额度 · 1 个已用完或过期")
+  expect(usage.balance).toBe("2 项免费额度：对话模型 1 个可选用 · 其余 1 项为图像 1，不能走对话接口 · 另有 1 项已用完或过期")
   expect(usage.windows.length).toBe(2)
   expect(usage.windows[0].name).toBe("kimi-k3")
   expect(usage.windows[0].display).toBe("82万 / 100万 tokens")
@@ -647,7 +647,7 @@ test("usage folds non-chat grants into one aside line", async () => {
   process.env.BAILIAN_CONSOLE_GATEWAY = url
   const h = await hooks()
   const usage = await h.auth.usage(async () => ({ type: "oauth", token: "tok", source: "browser" }))
-  expect(usage.balance).toBe("1 个模型有免费额度")
+  expect(usage.balance).toBe("6 项免费额度：对话模型 1 个可选用 · 其余 5 项为语音 2、向量/翻译/实时 2、图像 1，不能走对话接口")
   expect(usage.windows.length).toBe(2)
   expect(usage.windows[0].name).toBe("kimi-k3")
   const aside = usage.windows[1]

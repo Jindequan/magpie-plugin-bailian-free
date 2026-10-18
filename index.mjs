@@ -216,7 +216,8 @@ export const BailianFreeAuthPlugin = async ({ client }) => {
           const mediaNames = { image: "图像", video: "视频", speech: "语音", audio: "音频", text: "向量/翻译/实时" }
           return {
             plan: "新用户免费额度",
-            balance: freeQuotaNote(chat.length, gone),
+            balance:
+              `${chat.length + other.length} 项免费额度：对话模型 ${chat.length} 个可选用 · 其余 ${other.length} 项为${Object.entries(byMedia).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([m, n]) => `${mediaNames[m] ?? m} ${n}`).join("、")}，不能走对话接口${gone ? ` · 另有 ${gone} 项已用完或过期` : ""}`,
             windows: [
               ...chat.map(grantWindow),
               ...(other.length
