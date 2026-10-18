@@ -249,7 +249,7 @@ test("grantWindow scopes a text grant to its model and marks the rest aside", ()
   expect(text.models).toEqual(["kimi-k3"])
   expect(text.aside).toBeUndefined()
   expect(text.used).toBeCloseTo(18)
-  expect(text.display).toBe("82万 / 100万 tokens")
+  expect(text.display).toBe("剩 82万/100万 tokens")
   expect(text.amount).toBe(180000)
   expect(text.runsOutAt).toBe(new Date(1794873600000).toISOString())
   expect(text.runsOut).toBe(820000)
@@ -259,7 +259,7 @@ test("grantWindow scopes a text grant to its model and marks the rest aside", ()
   expect(image.aside).toBeUndefined()
   const speech = grantWindow({ model: "sambert-beth-v1", media: "speech", unit: "units", left: 3, limit: 3, ends: 0 })
   expect(speech.aside).toBe(true) // no channel for speech
-  expect(image.display).toBe("10 / 10 images")
+  expect(image.display).toBe("剩 10/10 张")
   expect(image.runsOutAt).toBeUndefined()
 })
 
@@ -308,10 +308,10 @@ test("usage lists the grants as windows from the console", async () => {
   const usage = await h.auth.usage(async () => ({ type: "oauth", token: "tok", source: "browser", accountId: "测试账号" }))
   expect(usage.plan).toBe("新用户免费额度")
   expect(usage.user).toBe("测试账号")
-  expect(usage.balance).toBe("2 项免费额度：对话 1 · 画图 1 · 另有 1 项已用完或过期")
+  expect(usage.balance).toBe("固定额度，用完即止：对话 1 个（tokens） · 画图 1 个（按张） · 另 1 项已用完或过期")
   expect(usage.windows.length).toBe(2)
   expect(usage.windows[0].name).toBe("kimi-k3")
-  expect(usage.windows[0].display).toBe("82万 / 100万 tokens")
+  expect(usage.windows[0].display).toBe("剩 82万/100万 tokens")
 })
 
 test("usage without a sign-in says so; provider.models stands in when the console can't be read", async () => {
@@ -653,7 +653,7 @@ test("usage folds non-chat grants into one aside line", async () => {
   process.env.BAILIAN_CONSOLE_GATEWAY = url
   const h = await hooks()
   const usage = await h.auth.usage(async () => ({ type: "oauth", token: "tok", source: "browser" }))
-  expect(usage.balance).toBe("6 项免费额度：对话 1 · 画图 1 · 其余 4 项为语音 2、向量/翻译/实时 2，暂无网关通道")
+  expect(usage.balance).toBe("固定额度，用完即止：对话 1 个（tokens） · 画图 1 个（按张） · 其余 4 项无通道")
   expect(usage.windows.length).toBe(3)
   expect(usage.windows[0].name).toBe("kimi-k3")
   expect(usage.windows[1].name).toBe("qwen-image-2.1-pro") // a drawer's own window now

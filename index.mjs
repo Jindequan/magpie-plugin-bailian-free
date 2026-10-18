@@ -263,10 +263,11 @@ export const BailianFreeAuthPlugin = async ({ client }) => {
           return {
             plan: "新用户免费额度",
             balance:
-              `${chat.length + served.length + rest.length} 项免费额度：对话 ${chat.length}${Object.entries(byKind).map(([m, n]) => ` · ${mediaNames[m] ?? m} ${n}`).join("")}${rest.length ? ` · 其余 ${rest.length} 项为${Object.entries(byMedia).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([m, n]) => `${restNames[m] ?? m} ${n}`).join("、")}，暂无网关通道` : ""}${gone ? ` · 另有 ${gone} 项已用完或过期` : ""}`,
+              `固定额度，用完即止：对话 ${chat.length} 个（tokens）${Object.entries(byKind).sort((a, b) => (a[0] === "image" ? 0 : 1) - (b[0] === "image" ? 0 : 1)).map(([m, n]) => ` · ${mediaNames[m] ?? m} ${n} 个（按${m === "image" ? "张" : "次"}）`).join("")}${rest.length ? ` · 其余 ${rest.length} 项无通道` : ""}${gone ? ` · 另 ${gone} 项已用完或过期` : ""}`,
             windows: [
               ...chat.map(grantWindow),
-              ...served.map(grantWindow),
+              // images before videos, each kind together
+              ...served.slice().sort((a, b) => (a.media === "image" ? 0 : 1) - (b.media === "image" ? 0 : 1)).map(grantWindow),
               ...(rest.length
                 ? [{
                     name: "暂无通道的免费额度",

@@ -125,18 +125,28 @@ export function fmtAmount(n) {
   return trim(n)
 }
 
-// grantWindow is one model's grant as a quota window: its own meter,
-// scoped to that model, ending when the grant does. A window the gateway
-// serves drives the allowance; what has no channel is shown aside.
+// grantUnit is what a grant counts in, the way the console's own pages
+// say it: tokens for a chat model, 张 for an image, 次 for a video.
+export function grantUnit(grant) {
+  if (grant.media === "image") return "张"
+  if (grant.media === "video") return "次"
+  if (grant.media === "speech" || grant.media === "audio") return "次"
+  return grant.unit === "images" ? "张" : grant.unit || "tokens"
+}
+
+// grantWindow is one model's grant as a quota window: a fixed amount
+// that ends when it is used up or the grant expires, scoped to that
+// model. A window the gateway serves drives the allowance; what has no
+// channel is shown aside.
 export function grantWindow(grant, aside = grant.media !== "text" && grant.media !== "image" && grant.media !== "video") {
-  const unit = grant.unit || "units"
+  const unit = grantUnit(grant)
   const used = grant.limit > 0 ? ((grant.limit - grant.left) / grant.limit) * 100 : 0
   return {
     name: grant.model,
     model: grant.model,
     ...(aside ? { aside: true } : { models: [grant.model] }),
     used,
-    display: `${fmtAmount(grant.left)} / ${fmtAmount(grant.limit)} ${unit}`,
+    display: `剩 ${fmtAmount(grant.left)}/${fmtAmount(grant.limit)} ${unit}`,
     amount: grant.limit - grant.left,
     limit: grant.limit,
     unit,
