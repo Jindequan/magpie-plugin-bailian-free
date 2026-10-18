@@ -9,7 +9,8 @@ import { readFreeQuota, verifyConsoleToken, signedOutError, usableApiKey, create
 import { fetchModelCatalog, servable, chatLikeId } from "./catalog.mjs"
 import { readBailianCLIProfile } from "./bl.mjs"
 import { startConsoleLogin } from "./login.mjs"
-import { configModels, runtimeModel, grantWindow, freeQuotaNote, BOOTSTRAP_IDS } from "./models.mjs"
+import { configModels, runtimeModel, mediaModel, grantWindow, freeQuotaNote, BOOTSTRAP_IDS } from "./models.mjs"
+import { mediaRequest, drawImages, startVideo, videoState, videoContent } from "./media.mjs"
 
 const PROVIDER_ID = "bailian-free"
 const PROVIDER_NAME = "百炼免费额度"
@@ -66,6 +67,13 @@ function jsonError(status, message, signIn) {
   })
 }
 
+// bodyText is a request's body as text, from either shape fetch takes.
+async function bodyText(req, init) {
+  const b = init?.body
+  if (b !== undefined && b !== null) return typeof b === "string" ? b : JSON.stringify(b)
+  return req ? await req.clone().text() : ""
+}
+
 // ensurePluginKey gives creds a key that spends the free quota: the one
 // kept with the sign-in when it is usable, else one created through the
 // console, labelled as this plugin's, kept for next time. At most one
@@ -82,6 +90,10 @@ async function ensurePluginKey(creds, auth, save) {
   } catch {}
   return creds
 }
+
+// nativeFetch sends to DashScope's own APIs, or where the env says they
+// live instead.
+const nativeFetch = (url, init) => fetch(String(url).replace(/^https:\/\/dashscope\.aliyuncs\.com\/api\/v1/, String(process.env.BAILIAN_DASHSCOPE_NATIVE ?? "https://dashscope.aliyuncs.com/api/v1").replace(/\/+$/, "")), init)
 
 // ---- Plugin -----------------------------------------------------------------
 
@@ -129,8 +141,13 @@ export const BailianFreeAuthPlugin = async ({ client }) => {
           if (grants) {
             const live = {}
             for (const g of grants) {
-              if (g.media !== "text" || !chatLikeId(g.model)) continue
-              live[g.model] = runtimeModel(provider, catalog.get(g.model) ?? synthetic(g.model), true)
+              // what the grant's model makes says where magpie serves
+              // it: chat, the images API, the videos API
+              if (g.media === "text" && chatLikeId(g.model)) {
+                live[g.model] = runtimeModel(provider, catalog.get(g.model) ?? synthetic(g.model), true)
+              } else if (g.media === "image" || g.media === "video") {
+                live[g.model] = mediaModel(provider, g.model, g.media, true)
+              }
             }
             if (Object.keys(live).length) return live
             // the grants read fine but nothing has room left: what the
@@ -174,6 +191,30 @@ export const BailianFreeAuthPlugin = async ({ client }) => {
                 "没有可用的 DashScope API Key（自动创建失败）：请在百炼控制台 › API-KEY 页创建 sk- 密钥后重新登录填写",
                 "expired",
               )
+            }
+            // the images and videos APIs are the vendor's own, behind the
+            // OpenAI shapes magpie speaks
+            const url = new URL(req ? req.url : String(input))
+            const media = mediaRequest(init?.method ?? req?.method ?? "POST", url.pathname)
+            if (media) {
+              const args = { key: creds.apiKey, fetch: nativeFetch }
+              let out
+              if (media.kind === "images") {
+                const body = JSON.parse(await bodyText(req, init))
+                out = await drawImages({ ...args, model: body.model, prompt: body.prompt, n: body.n, size: body.size })
+              } else if (media.kind === "video-start") {
+                const body = JSON.parse(await bodyText(req, init))
+                out = await startVideo({ ...args, model: body.model, prompt: body.prompt, size: body.size })
+              } else if (media.kind === "video-state") {
+                out = await videoState({ ...args, id: media.id })
+              } else {
+                out = await videoContent({ ...args, id: media.id })
+                if (out.status === 200) {
+                  return new Response(out.body, { status: 200, headers: { "Content-Type": out.contentType } })
+                }
+              }
+              if (out.error) return jsonError(out.status === 200 ? 502 : out.status, out.error, "kept")
+              return new Response(JSON.stringify(out.body), { status: 200, headers: { "Content-Type": "application/json" } })
             }
             const headers = new Headers(init?.headers ?? req?.headers)
             headers.delete("x-api-key")

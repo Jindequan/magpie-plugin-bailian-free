@@ -83,6 +83,38 @@ export function runtimeModel(provider, e, free) {
   }
 }
 
+// mediaModel is a model that only makes images or videos: no chat entry,
+// but the modality magpie's images and videos APIs ask for. What it makes
+// comes from the grant, so a new magpie kind reading the same field is
+// served the day it ships.
+export function mediaModel(provider, id, media, free) {
+  const kind = media === "video" ? "video" : "image"
+  return {
+    id,
+    providerID: provider.id,
+    name: id,
+    api: { id, url: DASHSCOPE_BASE, npm: NPM },
+    status: "active",
+    headers: {},
+    options: {},
+    cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+    limit: { context: 0, output: 0 },
+    capabilities: {
+      temperature: false,
+      reasoning: false,
+      attachment: false,
+      toolcall: false,
+      input: { text: true, image: false, audio: false, video: false, pdf: false },
+      output: { text: false, image: kind === "image", audio: false, video: kind === "video", pdf: false },
+      interleaved: false,
+    },
+    release_date: "",
+    variants: {},
+    free: !!free,
+    ...(free ? { rate: 0 } : {}),
+  }
+}
+
 // fmtAmount reads the way the console's own pages do: 万 and 亿.
 export function fmtAmount(n) {
   if (!Number.isFinite(n)) return String(n)

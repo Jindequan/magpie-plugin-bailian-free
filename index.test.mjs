@@ -32,6 +32,7 @@ afterEach(() => {
     tempDir = null
   }
   delete process.env.BAILIAN_CONSOLE_GATEWAY
+  delete process.env.BAILIAN_DASHSCOPE_NATIVE
   delete process.env.BAILIAN_CONFIG_DIR
   _internal.resetGrantsCache()
   _internal.resetKeyAttempt()
@@ -517,9 +518,12 @@ test("provider.models signed in is exactly the grants with room, at catalog limi
     { id: "bailian-free", models: configModels() },
     { auth: { type: "oauth", token: "tok", source: "browser" } },
   )
-  expect(Object.keys(models)).toEqual(["kimi-k3"]) // the image grant is not a chat model
+  // the chat grant at its catalog limits, the image grant as a drawer
+  expect(Object.keys(models)).toEqual(["kimi-k3", "qwen-image-2.1-pro"])
   expect(models["kimi-k3"].free).toBe(true)
   expect(models["kimi-k3"].limit.output).toBe(1_048_576)
+  expect(models["qwen-image-2.1-pro"].capabilities.output).toEqual({ text: false, image: true, audio: false, video: false, pdf: false })
+  expect(models["qwen-image-2.1-pro"].capabilities.output.image).toBe(true)
 })
 
 test("callConsoleApi retries a network failure twice before giving up", async () => {
@@ -664,4 +668,98 @@ test("chatLikeId and servable keep endpoints and specialists out", async () => {
   for (const id of ["kimi-k3", "qwen3.8-omni-flash", "qwen3.8-max", "deepseek-v4.1-flash"]) {
     expect(chatLikeId(id)).toBe(true)
   }
+})
+
+// ---- the media APIs behind the OpenAI shapes -----------------------------------
+
+import { mediaRequest, drawImages, startVideo, videoState, dashscopeSize } from "./media.mjs"
+
+test("mediaRequest takes the OpenAI-shaped paths", () => {
+  expect(mediaRequest("POST", "/compatible-mode/v1/images/generations")).toEqual({ kind: "images" })
+  expect(mediaRequest("POST", "/v1/videos")).toEqual({ kind: "video-start" })
+  expect(mediaRequest("GET", "/v1/videos/task-9")).toEqual({ kind: "video-state", id: "task-9" })
+  expect(mediaRequest("GET", "/v1/videos/task-9/content")).toEqual({ kind: "video-content", id: "task-9" })
+  expect(mediaRequest("POST", "/v1/chat/completions")).toBeNull()
+  expect(mediaRequest("GET", "/v1/models")).toBeNull()
+  expect(dashscopeSize("1024x1024")).toBe("1024*1024")
+  expect(dashscopeSize("16:9")).toBe("16:9")
+})
+
+test("drawImages translates to the native chat-shaped prompt and back", async () => {
+  const seen = []
+  const fake = Bun.serve({
+    port: 0,
+    async fetch(r) {
+      const u = new URL(r.url)
+      seen.push({ path: u.pathname, body: await r.json().catch(() => null), auth: r.headers.get("authorization") })
+      if (u.pathname.includes("multimodal-generation")) {
+        return Response.json({ output: { choices: [{ message: { content: [{ image: "https://img/1.png" }, { image: "https://img/2.png" }] } }] } })
+      }
+      return new Response("nf", { status: 404 })
+    },
+  })
+  server = fake
+  process.env.BAILIAN_DASHSCOPE_NATIVE = fake.url + "/api/v1"
+  const out = await drawImages({ key: "sk-k", model: "qwen-image-3.0", prompt: "an apple", n: 2, size: "1024x1024" })
+  expect(out.status).toBe(200)
+  expect(out.body.data).toEqual([{ url: "https://img/1.png" }, { url: "https://img/2.png" }])
+  expect(seen[0].auth).toBe("Bearer sk-k")
+  expect(seen[0].body.parameters).toEqual({ n: 2, size: "1024*1024" })
+  expect(seen[0].body.input.messages[0].content[0].text).toBe("an apple")
+})
+
+test("videos submit, poll and carry the vendor's own error words", async () => {
+  const calls = []
+  const fake = Bun.serve({
+    port: 0,
+    async fetch(r) {
+      const u = new URL(r.url)
+      calls.push({ method: r.method, path: u.pathname, async: r.headers.get("x-dashscope-async") })
+      if (u.pathname.includes("video-synthesis")) {
+        return Response.json({ output: { task_id: "t-1", task_status: "PENDING" } })
+      }
+      if (u.pathname.endsWith("/tasks/t-1")) {
+        return Response.json({ output: { task_id: "t-1", task_status: "SUCCEEDED", video_url: "https://v/1.mp4" }, usage: { video_duration: 5 } })
+      }
+      if (u.pathname.endsWith("/tasks/t-2")) {
+        return Response.json({ output: { task_status: "FAILED" }, code: "VideoFailed", message: "quota exceeded" })
+      }
+      return new Response("nf", { status: 404 })
+    },
+  })
+  server = fake
+  process.env.BAILIAN_DASHSCOPE_NATIVE = fake.url + "/api/v1"
+  const start = await startVideo({ key: "sk-k", model: "wan3.0-video", prompt: "a dance" })
+  expect(start.status).toBe(200)
+  expect(start.body).toEqual({ id: "t-1", status: "queued", progress: 0 })
+  expect(calls[0].async).toBe("enable")
+  const st = await videoState({ key: "sk-k", id: "t-1" })
+  expect(st.body).toEqual({ status: "succeeded", video: { url: "https://v/1.mp4", duration: 5 } })
+  const failed = await videoState({ key: "sk-k", id: "t-2" })
+  expect(failed.body.status).toBe("failed")
+  expect(failed.body.error.message).toContain("quota exceeded")
+})
+
+test("the loader's fetch answers media paths through the translation", async () => {
+  const fake = Bun.serve({
+    port: 0,
+    async fetch(r) {
+      const u = new URL(r.url)
+      if (u.pathname.includes("multimodal-generation")) {
+        return Response.json({ output: { choices: [{ message: { content: [{ image: "https://img/x.png" }] } }] } })
+      }
+      return new Response("{}", { status: 200 })
+    },
+  })
+  server = fake
+  process.env.BAILIAN_DASHSCOPE_NATIVE = fake.url + "/api/v1"
+  const h = await hooks()
+  const loader = await h.auth.loader(async () => ({ type: "oauth", token: "tok", apiKey: "sk-live", source: "browser" }))
+  const res = await loader.fetch("https://dashscope.aliyuncs.com/compatible-mode/v1/images/generations", {
+    method: "POST",
+    body: JSON.stringify({ model: "qwen-image-3.0", prompt: "an apple", n: 1 }),
+  })
+  expect(res.status).toBe(200)
+  const body = await res.json()
+  expect(body.data[0].url).toBe("https://img/x.png")
 })
