@@ -126,16 +126,15 @@ export function fmtAmount(n) {
 }
 
 // grantWindow is one model's grant as a quota window: its own meter,
-// scoped to that model, ending when the grant does. Text grants drive the
-// allowance; the rest are shown aside.
-export function grantWindow(grant) {
+// scoped to that model, ending when the grant does. A window the gateway
+// serves drives the allowance; what has no channel is shown aside.
+export function grantWindow(grant, aside = grant.media !== "text" && grant.media !== "image" && grant.media !== "video") {
   const unit = grant.unit || "units"
   const used = grant.limit > 0 ? ((grant.limit - grant.left) / grant.limit) * 100 : 0
-  const text = grant.media === "text"
   return {
     name: grant.model,
     model: grant.model,
-    ...(text ? { models: [grant.model] } : { aside: true }),
+    ...(aside ? { aside: true } : { models: [grant.model] }),
     used,
     display: `${fmtAmount(grant.left)} / ${fmtAmount(grant.limit)} ${unit}`,
     amount: grant.limit - grant.left,

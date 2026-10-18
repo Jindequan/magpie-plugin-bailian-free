@@ -255,8 +255,10 @@ test("grantWindow scopes a text grant to its model and marks the rest aside", ()
   expect(text.runsOut).toBe(820000)
 
   const image = grantWindow({ model: "qwen-image-2.1-pro", media: "image", unit: "images", left: 10, limit: 10, ends: 0 })
-  expect(image.aside).toBe(true)
-  expect(image.models).toBeUndefined()
+  expect(image.models).toEqual(["qwen-image-2.1-pro"]) // the images API serves it
+  expect(image.aside).toBeUndefined()
+  const speech = grantWindow({ model: "sambert-beth-v1", media: "speech", unit: "units", left: 3, limit: 3, ends: 0 })
+  expect(speech.aside).toBe(true) // no channel for speech
   expect(image.display).toBe("10 / 10 images")
   expect(image.runsOutAt).toBeUndefined()
 })
@@ -306,7 +308,7 @@ test("usage lists the grants as windows from the console", async () => {
   const usage = await h.auth.usage(async () => ({ type: "oauth", token: "tok", source: "browser", accountId: "测试账号" }))
   expect(usage.plan).toBe("新用户免费额度")
   expect(usage.user).toBe("测试账号")
-  expect(usage.balance).toBe("2 项免费额度：对话模型 1 个可选用 · 其余 1 项为图像 1，不能走对话接口 · 另有 1 项已用完或过期")
+  expect(usage.balance).toBe("2 项免费额度：对话 1 · 画图 1 · 另有 1 项已用完或过期")
   expect(usage.windows.length).toBe(2)
   expect(usage.windows[0].name).toBe("kimi-k3")
   expect(usage.windows[0].display).toBe("82万 / 100万 tokens")
@@ -651,13 +653,14 @@ test("usage folds non-chat grants into one aside line", async () => {
   process.env.BAILIAN_CONSOLE_GATEWAY = url
   const h = await hooks()
   const usage = await h.auth.usage(async () => ({ type: "oauth", token: "tok", source: "browser" }))
-  expect(usage.balance).toBe("6 项免费额度：对话模型 1 个可选用 · 其余 5 项为语音 2、向量/翻译/实时 2、图像 1，不能走对话接口")
-  expect(usage.windows.length).toBe(2)
+  expect(usage.balance).toBe("6 项免费额度：对话 1 · 画图 1 · 其余 4 项为语音 2、向量/翻译/实时 2，暂无网关通道")
+  expect(usage.windows.length).toBe(3)
   expect(usage.windows[0].name).toBe("kimi-k3")
-  const aside = usage.windows[1]
+  expect(usage.windows[1].name).toBe("qwen-image-2.1-pro") // a drawer's own window now
+  const aside = usage.windows[2]
   expect(aside.aside).toBe(true)
-  expect(aside.display).toContain("图像 1")
   expect(aside.display).toContain("语音 2")
+  expect(aside.display).toContain("向量/翻译/实时 2")
 })
 
 test("chatLikeId and servable keep endpoints and specialists out", async () => {

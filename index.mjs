@@ -247,28 +247,34 @@ export const BailianFreeAuthPlugin = async ({ client }) => {
           const creds = await currentCreds(auth)
           if (!creds?.token) return { error: "not signed in", signIn: "kept" }
           const { grants, gone } = await readGrants(creds)
-          // chat grants get their own window; the rest — embeddings,
-          // reranking, translation, images, video, speech — are one line,
-          // not forty sambert voices each with a meter
+          // every grant the gateway serves gets its own window — chat at
+          // chat, images at the images API, videos at the videos API; the
+          // rest (embeddings, reranking, translation, speech, audio) are
+          // one line, not forty sambert voices each with a meter
           const chat = grants.filter((g) => g.media === "text" && chatLikeId(g.model))
-          const other = grants.filter((g) => !chat.includes(g))
+          const served = grants.filter((g) => g.media === "image" || g.media === "video")
+          const mediaNames = { image: "画图", video: "视频" }
+          const rest = grants.filter((g) => !chat.includes(g) && !served.includes(g))
           const byMedia = {}
-          for (const g of other) byMedia[g.media] = (byMedia[g.media] ?? 0) + 1
-          const mediaNames = { image: "图像", video: "视频", speech: "语音", audio: "音频", text: "向量/翻译/实时" }
+          for (const g of rest) byMedia[g.media] = (byMedia[g.media] ?? 0) + 1
+          const restNames = { speech: "语音", audio: "音频", text: "向量/翻译/实时" }
+          const byKind = {}
+          for (const g of served) byKind[g.media] = (byKind[g.media] ?? 0) + 1
           return {
             plan: "新用户免费额度",
             balance:
-              `${chat.length + other.length} 项免费额度：对话模型 ${chat.length} 个可选用 · 其余 ${other.length} 项为${Object.entries(byMedia).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([m, n]) => `${mediaNames[m] ?? m} ${n}`).join("、")}，不能走对话接口${gone ? ` · 另有 ${gone} 项已用完或过期` : ""}`,
+              `${chat.length + served.length + rest.length} 项免费额度：对话 ${chat.length}${Object.entries(byKind).map(([m, n]) => ` · ${mediaNames[m] ?? m} ${n}`).join("")}${rest.length ? ` · 其余 ${rest.length} 项为${Object.entries(byMedia).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([m, n]) => `${restNames[m] ?? m} ${n}`).join("、")}，暂无网关通道` : ""}${gone ? ` · 另有 ${gone} 项已用完或过期` : ""}`,
             windows: [
               ...chat.map(grantWindow),
-              ...(other.length
+              ...served.map(grantWindow),
+              ...(rest.length
                 ? [{
-                    name: "非对话类免费额度",
+                    name: "暂无通道的免费额度",
                     aside: true,
                     used: 0,
-                    display: Object.entries(byMedia).map(([m, n]) => `${mediaNames[m] ?? m} ${n}`).join(" · "),
+                    display: Object.entries(byMedia).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([m, n]) => `${restNames[m] ?? m} ${n}`).join(" · "),
                     amount: 0,
-                    limit: other.length,
+                    limit: rest.length,
                     unit: "项",
                   }]
                 : []),
