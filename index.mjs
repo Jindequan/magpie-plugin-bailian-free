@@ -213,7 +213,7 @@ export const BailianFreeAuthPlugin = async ({ client }) => {
           const other = grants.filter((g) => !chat.includes(g))
           const byMedia = {}
           for (const g of other) byMedia[g.media] = (byMedia[g.media] ?? 0) + 1
-          const mediaNames = { image: "图像", video: "视频", speech: "语音", audio: "音频", text: "其他文本" }
+          const mediaNames = { image: "图像", video: "视频", speech: "语音", audio: "音频", text: "向量/翻译/实时" }
           return {
             plan: "新用户免费额度",
             balance: freeQuotaNote(chat.length, gone),
