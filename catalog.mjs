@@ -53,13 +53,26 @@ export function modelEntry(m) {
   }
 }
 
+// A dash segment that names an endpoint or a purpose a chat gateway
+// cannot serve: realtime and streaming sockets, file transcription,
+// embeddings and reranking, translation, speech.
+const NON_CHAT_SEGMENTS = new Set([
+  "realtime", "streaming", "filetrans", "message", "embedding", "rerank",
+  "mt", "asr", "tts", "sambert", "paraformer", "livetranslate",
+])
+
+// chatLikeId is whether a model id speaks chat, by its own segments.
+export function chatLikeId(id) {
+  return !String(id).split("-").some((s) => NON_CHAT_SEGMENTS.has(s))
+}
+
 // servable is whether a catalog model is a chat model this provider can
 // forward: text in, text out, text generation — not a realtime or
-// transcription endpoint, not an image or speech maker.
+// transcription endpoint, not an image, speech or translation maker.
 export function servable(e) {
   if (!e.caps.includes("TG")) return false
   if (!e.request.includes("Text") || !e.response.includes("Text")) return false
-  return !/(?:^|-)(?:realtime|streaming|filetrans|message)(?:-[0-9-]+)?$/.test(e.id)
+  return chatLikeId(e.id)
 }
 
 let catalogCache = { site: "", at: 0, entries: null }

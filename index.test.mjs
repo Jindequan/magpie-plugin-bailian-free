@@ -34,6 +34,7 @@ afterEach(() => {
   delete process.env.BAILIAN_CONSOLE_GATEWAY
   delete process.env.BAILIAN_CONFIG_DIR
   _internal.resetGrantsCache()
+  _internal.resetKeyAttempt()
   resetCatalogCache()
 })
 
@@ -55,6 +56,7 @@ function startConsole(calls) {
         bearer: req.headers.get("authorization"),
         cornerstone: params.Data?.cornerstoneParam?.consoleSite,
         pageNo: params.Data?.input?.pageNo,
+        reqDTO: params.Data?.reqDTO,
       })
       const reply = calls[params.Api]?.(params, u)
       if (reply === undefined) return new Response("no fixture", { status: 500 })
@@ -323,6 +325,10 @@ test("usage without a sign-in says so; provider.models stands in when the consol
 })
 
 test("loader sends with the DashScope key and says what is missing", async () => {
+  const refuse = startConsole({
+    "zeldaEasy.bailian-dash-workspace.api-key.createApiKeyV4": () => fixture("not-logged-in.json"),
+  })
+  process.env.BAILIAN_CONSOLE_GATEWAY = refuse.url
   let dashscope = null
   server = Bun.serve({
     port: 0,
@@ -542,5 +548,120 @@ test("callConsoleApi retries a network failure twice before giving up", async ()
   } catch (e) {
     expect(failures).toBe(3)
     expect(e.message).toContain("连不上百炼")
+  }
+})
+
+// ---- the key that spends the quota --------------------------------------------
+
+test("usableApiKey takes the keys the free quota spends", async () => {
+  const { usableApiKey } = await import("./console.mjs")
+  expect(usableApiKey("sk-ws-H.PYLMMDE.83NG.x")).toBe(true)
+  expect(usableApiKey("sk-abc123")).toBe(true)
+  expect(usableApiKey("sk-sp-tok")).toBe(false) // a Token Plan key
+  expect(usableApiKey("")).toBe(false)
+  expect(usableApiKey(undefined)).toBe(false)
+})
+
+test("createPluginKey sends the console's own shape and returns the full key", async () => {
+  const { createPluginKey, PLUGIN_KEY_DESCRIPTION } = await import("./console.mjs")
+  const { url, seen } = startConsole({
+    "zeldaEasy.bailian-dash-workspace.api-key.createApiKeyV4": (params) =>
+      JSON.stringify({ code: "200", data: { DataV2: { data: { success: true, data: { key: "sk-ws-made", description: params.Data.reqDTO.description } } }, success: true } }),
+  })
+  process.env.BAILIAN_CONSOLE_GATEWAY = url
+  const key = await createPluginKey({ token: "tok" })
+  expect(key).toBe("sk-ws-made")
+  expect(seen[0].api).toContain("createApiKeyV4")
+  expect(seen[0].reqDTO).toEqual({ description: PLUGIN_KEY_DESCRIPTION })
+})
+
+test("browser sign-in makes a key when none was pasted", async () => {
+  const made = []
+  const { url } = startConsole({
+    "zeldaEasy.bailian-commerce.freeTrial.queryFreeTierQuota": () => fixture("free-quota.json"),
+    "zeldaEasy.bailian-dash-workspace.api-key.createApiKeyV4": (params) => {
+      made.push(params.Data.reqDTO.description)
+      return JSON.stringify({ code: "200", data: { DataV2: { data: { success: true, data: { key: "sk-ws-auto" } } }, success: true } })
+    },
+  })
+  process.env.BAILIAN_CONSOLE_GATEWAY = url
+  const h = await hooks()
+  const flow = await h.auth.methods[0].authorize({ apiKey: "" })
+  const ok = await fetch(`http://127.0.0.1:${flow.url.match(/127\.0\.0\.1:(\d+)/)[1]}/?state=${flow.url.split("state=")[1]}&access_token=minted`, { method: "POST", body: "" })
+  expect(ok.status).toBe(200)
+  const r = await flow.callback()
+  expect(r.type).toBe("success")
+  expect(r.apiKey).toBe("sk-ws-auto")
+  expect(made).toEqual(["magpie-plugin-bailian-free"])
+})
+
+test("loader makes and keeps a key when the sign-in has none", async () => {
+  const { url } = startConsole({
+    "zeldaEasy.bailian-dash-workspace.api-key.createApiKeyV4": () =>
+      JSON.stringify({ code: "200", data: { DataV2: { data: { success: true, data: { key: "sk-ws-lazy" } } }, success: true } }),
+  })
+  process.env.BAILIAN_CONSOLE_GATEWAY = url
+  const saved = []
+  const client = { auth: { set: async ({ body }) => saved.push(body) } }
+  const h = await BailianFreeAuthPlugin({ client })
+  let dashscopeAuth = null
+  const sink = Bun.serve({
+    port: 0,
+    async fetch(req) {
+      dashscopeAuth = req.headers.get("authorization")
+      return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } })
+    },
+  })
+  server = sink
+  const loader = await h.auth.loader(async () => ({ type: "oauth", token: "tok", apiKey: "sk-sp-notusable", source: "browser" }))
+  const res = await loader.fetch(`${sink.url}/chat/completions`, { method: "POST", body: "{}" })
+  expect(res.status).toBe(200)
+  expect(dashscopeAuth).toBe("Bearer sk-ws-lazy")
+  expect(saved.length).toBe(1)
+  expect(saved[0].apiKey).toBe("sk-ws-lazy")
+})
+
+// ---- the card stays readable ----------------------------------------------------
+
+test("usage folds non-chat grants into one aside line", async () => {
+  const { url } = startConsole({
+    "zeldaHttp.dashscopeModel./zelda/api/v1/modelCenter/listFoundationModels": () =>
+      JSON.stringify({ code: "200", data: { DataV2: { data: { success: true, data: { total: 6, list: [
+        { model: "kimi-k3", capabilities: ["Reasoning", "TG"] },
+        { model: "qwen3.7-text-embedding-flash", capabilities: ["TG"] },
+        { model: "qwen-image", capabilities: ["IG"], items: [{ model: "qwen-image-2.1-pro", capabilities: ["IG"] }] },
+        { model: "sambert-beth-v1", capabilities: ["TTS"] },
+        { model: "sambert-hanna-v1", capabilities: ["TTS"] },
+        { model: "qwen3.8-omni-flash-realtime", capabilities: ["TG"] },
+      ] } } }, success: true } }),
+    "zeldaEasy.bailian-commerce.freeTrial.queryFreeTierQuota": () =>
+      JSON.stringify({ code: "200", data: { DataV2: { data: { success: true, data: { freeTierQuotas: [
+        { model: "kimi-k3", quotaTotal: 820000, quotaInitTotal: 1000000, quotaValidityPeriod: 1794873600000, quotaStatus: "VALID" },
+        { model: "qwen3.7-text-embedding-flash", quotaTotal: 100000, quotaInitTotal: 1000000, quotaValidityPeriod: 1794873600000, quotaStatus: "VALID" },
+        { model: "qwen-image-2.1-pro", quotaTotal: "10", quotaInitTotal: "10", quotaValidityPeriod: 1798732800000, quotaStatus: "VALID" },
+        { model: "sambert-beth-v1", quotaTotal: 30000, quotaInitTotal: 30000, quotaStatus: "VALID" },
+        { model: "sambert-hanna-v1", quotaTotal: 30000, quotaInitTotal: 30000, quotaStatus: "VALID" },
+        { model: "qwen3.8-omni-flash-realtime", quotaTotal: 100000, quotaInitTotal: 100000, quotaStatus: "VALID" },
+      ] } } }, success: true } }),
+  })
+  process.env.BAILIAN_CONSOLE_GATEWAY = url
+  const h = await hooks()
+  const usage = await h.auth.usage(async () => ({ type: "oauth", token: "tok", source: "browser" }))
+  expect(usage.balance).toBe("1 个模型有免费额度")
+  expect(usage.windows.length).toBe(2)
+  expect(usage.windows[0].name).toBe("kimi-k3")
+  const aside = usage.windows[1]
+  expect(aside.aside).toBe(true)
+  expect(aside.display).toContain("图像 1")
+  expect(aside.display).toContain("语音 2")
+})
+
+test("chatLikeId and servable keep endpoints and specialists out", async () => {
+  const { chatLikeId } = await import("./catalog.mjs")
+  for (const id of ["qwen3.7-text-embedding-flash", "qwen3.7-text-rerank", "qwen-mt-uni", "qwen3.8-omni-flash-realtime", "qwen-audio-3.1-realtime-plus", "sambert-beth-v1"]) {
+    expect(chatLikeId(id)).toBe(false)
+  }
+  for (const id of ["kimi-k3", "qwen3.8-omni-flash", "qwen3.8-max", "deepseek-v4.1-flash"]) {
+    expect(chatLikeId(id)).toBe(true)
   }
 })

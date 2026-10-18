@@ -5,8 +5,8 @@
 // so the plugin signs in the way Bailian's CLI does (a loopback
 // console-login page, or bl's own sign-in, read only).
 
-import { readFreeQuota, verifyConsoleToken, signedOutError } from "./console.mjs"
-import { fetchModelCatalog, servable } from "./catalog.mjs"
+import { readFreeQuota, verifyConsoleToken, signedOutError, usableApiKey, createPluginKey } from "./console.mjs"
+import { fetchModelCatalog, servable, chatLikeId } from "./catalog.mjs"
 import { readBailianCLIProfile } from "./bl.mjs"
 import { startConsoleLogin } from "./login.mjs"
 import { configModels, runtimeModel, grantWindow, freeQuotaNote, BOOTSTRAP_IDS } from "./models.mjs"
@@ -66,9 +66,31 @@ function jsonError(status, message, signIn) {
   })
 }
 
+// ensurePluginKey gives creds a key that spends the free quota: the one
+// kept with the sign-in when it is usable, else one created through the
+// console, labelled as this plugin's, kept for next time. At most one
+// attempt a while, so a console that can't create keys doesn't pile them.
+let keyAttempt = { at: 0 }
+async function ensurePluginKey(creds, auth, save) {
+  if (!creds?.token || usableApiKey(creds.apiKey)) return creds
+  if (Date.now() - keyAttempt.at < 10 * 60 * 1000) return creds
+  keyAttempt = { at: Date.now() }
+  try {
+    const key = await createPluginKey({ token: creds.token, site: creds.site, region: creds.region })
+    creds = { ...creds, apiKey: key }
+    await save?.({ ...auth, apiKey: key })
+  } catch {}
+  return creds
+}
+
 // ---- Plugin -----------------------------------------------------------------
 
-export const BailianFreeAuthPlugin = async () => {
+export const BailianFreeAuthPlugin = async ({ client }) => {
+  const saveAuth = async (next) => {
+    try {
+      await client?.auth?.set?.({ path: { id: PROVIDER_ID }, body: next })
+    } catch {}
+  }
   return {
     config: async (config) => {
       config.provider ??= {}
@@ -107,7 +129,7 @@ export const BailianFreeAuthPlugin = async () => {
           if (grants) {
             const live = {}
             for (const g of grants) {
-              if (g.media !== "text") continue
+              if (g.media !== "text" || !chatLikeId(g.model)) continue
               live[g.model] = runtimeModel(provider, catalog.get(g.model) ?? synthetic(g.model), true)
             }
             if (Object.keys(live).length) return live
@@ -136,17 +158,20 @@ export const BailianFreeAuthPlugin = async () => {
           apiKey: "bailian-free",
           async fetch(input, init = {}) {
             const req = input instanceof Request ? input : null
+            let auth
             let creds
             try {
-              creds = await currentCreds(await getAuth())
+              auth = await getAuth()
+              creds = await currentCreds(auth)
             } catch (e) {
               return jsonError(401, e?.message ?? String(e), "expired")
             }
             if (!creds) return jsonError(401, "未登录：请先完成百炼登录", "expired")
-            if (!creds.apiKey) {
+            creds = await ensurePluginKey(creds, auth, saveAuth)
+            if (!usableApiKey(creds.apiKey)) {
               return jsonError(
                 401,
-                "未设置 DashScope API Key：重新登录并在提示里填写 sk- 开头的密钥（百炼控制台 › API-KEY 页创建）",
+                "没有可用的 DashScope API Key（自动创建失败）：请在百炼控制台 › API-KEY 页创建 sk- 密钥后重新登录填写",
                 "expired",
               )
             }
@@ -181,10 +206,31 @@ export const BailianFreeAuthPlugin = async () => {
           const creds = await currentCreds(auth)
           if (!creds?.token) return { error: "not signed in", signIn: "kept" }
           const { grants, gone } = await readGrants(creds)
+          // chat grants get their own window; the rest — embeddings,
+          // reranking, translation, images, video, speech — are one line,
+          // not forty sambert voices each with a meter
+          const chat = grants.filter((g) => g.media === "text" && chatLikeId(g.model))
+          const other = grants.filter((g) => !chat.includes(g))
+          const byMedia = {}
+          for (const g of other) byMedia[g.media] = (byMedia[g.media] ?? 0) + 1
+          const mediaNames = { image: "图像", video: "视频", speech: "语音", audio: "音频", text: "其他文本" }
           return {
             plan: "新用户免费额度",
-            balance: freeQuotaNote(grants.filter((g) => g.media === "text").length, gone),
-            windows: grants.map(grantWindow),
+            balance: freeQuotaNote(chat.length, gone),
+            windows: [
+              ...chat.map(grantWindow),
+              ...(other.length
+                ? [{
+                    name: "非对话类免费额度",
+                    aside: true,
+                    used: 0,
+                    display: Object.entries(byMedia).map(([m, n]) => `${mediaNames[m] ?? m} ${n}`).join(" · "),
+                    amount: 0,
+                    limit: other.length,
+                    unit: "项",
+                  }]
+                : []),
+            ],
             user: auth.accountId || "阿里云账号",
             signIn: "kept",
           }
@@ -200,15 +246,15 @@ export const BailianFreeAuthPlugin = async () => {
         {
           type: "oauth",
           label: "阿里云百炼账号（浏览器登录）",
-          prompts: [
-            {
-              type: "text",
-              key: "apiKey",
-              message:
-                "DashScope API Key（sk-…，百炼控制台 › API-KEY 页创建）：发请求用。只看免费额度可留空，之后重新登录补上。",
-              placeholder: "sk-…",
-            },
-          ],
+              prompts: [
+                {
+                  type: "text",
+                  key: "apiKey",
+                  message:
+                    "DashScope API Key（sk-…）：可留空，插件会用登录态自动创建一个专用 Key；填了就用你的（sk-sp- 的 Token Plan Key 不能用于免费额度）。",
+                  placeholder: "sk-…（可留空）",
+                },
+              ],
           authorize: async (inputs) => {
             const login = await startConsoleLogin()
             return {
@@ -223,6 +269,14 @@ export const BailianFreeAuthPlugin = async () => {
                   } catch (e) {
                     return { type: "failed", error: `登录态无法读取免费额度（${e?.message ?? e}），请重新发起登录` }
                   }
+                  let apiKey = String(inputs?.apiKey ?? "").trim()
+                  if (!usableApiKey(apiKey)) {
+                    // the key that spends the quota is made with the token
+                    // itself; a pasted one (when it works) is kept instead
+                    try {
+                      apiKey = await createPluginKey({ token: v.token, site: v.site, region: v.region })
+                    } catch {}
+                  }
                   return {
                     type: "success",
                     access: "",
@@ -231,7 +285,7 @@ export const BailianFreeAuthPlugin = async () => {
                     token: v.token,
                     site: v.site ?? "",
                     region: v.region ?? "",
-                    apiKey: String(inputs?.apiKey ?? "").trim(),
+                    apiKey,
                     source: "browser",
                     accountId: "阿里云账号",
                   }
@@ -266,6 +320,14 @@ export const BailianFreeAuthPlugin = async () => {
                   : `无法验证百炼 CLI 的登录态（${e?.message ?? e}）`
                 return { type: "failed", error: why }
               }
+              let apiKey = p.apiKey ?? ""
+              if (!usableApiKey(apiKey)) {
+                // bl's own key may be a Token Plan key (sk-sp-…), which the
+                // free quota doesn't take; make one that it does
+                try {
+                  apiKey = await createPluginKey({ token: p.token, site: p.site, region: p.region })
+                } catch {}
+              }
               return {
                 type: "success",
                 access: "",
@@ -274,7 +336,7 @@ export const BailianFreeAuthPlugin = async () => {
                 token: p.token,
                 site: p.site ?? "",
                 region: p.region ?? "",
-                apiKey: p.apiKey ?? "",
+                apiKey,
                 source: "bl",
                 accountId: "阿里云账号（百炼 CLI）",
               }
@@ -290,7 +352,11 @@ export const _internal = {
   currentCreds,
   readGrants,
   renewHint,
+  ensurePluginKey,
   resetGrantsCache: () => {
     grantsCache = { token: "", at: 0, value: null }
+  },
+  resetKeyAttempt: () => {
+    keyAttempt = { at: 0 }
   },
 }

@@ -210,3 +210,34 @@ export async function verifyConsoleToken({ token, site, region, fetch: doFetch =
   })
   return true
 }
+
+// ---- API keys (the console's own key center) ---------------------------------
+//
+// Requests spend the free quota at DashScope's OpenAI-compatible endpoint
+// with the account's own API key. The console's key center creates one
+// through the same gateway (createApiKeyV4, a reqDTO envelope, the reply
+// carries the full key exactly once), so a signed-in account never has to
+// paste one. A Token Plan key (sk-sp-…) serves only the token-plan
+// endpoint and is not usable here.
+
+export const API_CREATE_KEY = "zeldaEasy.bailian-dash-workspace.api-key.createApiKeyV4"
+export const API_LIST_KEYS = "zeldaEasy.bailian-dash-workspace.api-key.listApiKeys4Agent"
+export const PLUGIN_KEY_DESCRIPTION = "magpie-plugin-bailian-free"
+
+export function usableApiKey(key) {
+  const k = String(key ?? "").trim()
+  return /^sk-(?!sp)/.test(k)
+}
+
+// createPluginKey makes a key of the account's own, labelled as this
+// plugin's, and returns it in full (the only time it is readable).
+export async function createPluginKey({ token, site, region, description = PLUGIN_KEY_DESCRIPTION, fetch: doFetch = fetch, env = process.env }) {
+  const r = await callConsoleApi({
+    api: API_CREATE_KEY,
+    data: { reqDTO: { description } },
+    token, site, region, fetch: doFetch, env,
+  })
+  const key = String(r?.key ?? "").trim()
+  if (!key) throw changedError()
+  return key
+}

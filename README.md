@@ -23,10 +23,13 @@ free-quota API won't take — is refused at sign-in with what to do, not
 left to quietly fall back to the bootstrap models. When that happens,
 run `bl login` again and re-sign-in, or use the browser method.
 
-Requests need a **DashScope API key** (`sk-…`, created on the console's
-API-KEY page); the browser sign-in asks for it up front, and bl's own key
-is picked up from its profile when it has one. The quota card lists each
-model's grant, what is left of it and when it ends, and the free grants
+Requests need a **DashScope API key** (`sk-`): the sign-in makes one
+itself, through the console and labelled `magpie-plugin-bailian-free` —
+nothing to paste and nothing of yours touched (a pasted `sk-` key is used
+when given; a `sk-sp-` Token Plan key can't spend the free quota, so one
+is made for those too). The quota card lists each chat model's grant,
+what is left of it and when it ends — embeddings, rerankers, translation,
+image, video and speech grants fold into one line — and the free grants
 feed magpie's per-model allowance, so free quota is spent before anything
 paid.
 
