@@ -27,7 +27,9 @@ Requests need a **DashScope API key** (`sk-`): the sign-in makes one
 itself, through the console and labelled `magpie-plugin-bailian-free` —
 nothing to paste and nothing of yours touched (a pasted `sk-` key is used
 when given; a `sk-sp-` Token Plan key can't spend the free quota, so one
-is made for those too). The quota card lists each chat model's grant,
+is made for those too; deleting the made key on the console's API-KEY
+page stops the plugin's requests until the next sign-in makes another).
+The quota card lists each chat model's grant,
 what is left of it and when it ends — embeddings, rerankers, translation,
 image, video and speech grants fold into one line — and the free grants
 feed magpie's per-model allowance, so free quota is spent before anything

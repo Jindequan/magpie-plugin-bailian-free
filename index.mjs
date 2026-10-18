@@ -145,7 +145,9 @@ export const BailianFreeAuthPlugin = async ({ client }) => {
               // it: chat, the images API, the videos API
               if (g.media === "text" && chatLikeId(g.model)) {
                 live[g.model] = runtimeModel(provider, catalog.get(g.model) ?? synthetic(g.model), true)
-              } else if (g.media === "image" || g.media === "video") {
+              } else if ((g.media === "image" || g.media === "video") && chatLikeId(g.model)) {
+                // an image or video model that only translates (qwen-mt-…)
+                // takes no plain text-to-media prompt: it draws nothing
                 live[g.model] = mediaModel(provider, g.model, g.media, true)
               }
             }
@@ -252,12 +254,12 @@ export const BailianFreeAuthPlugin = async ({ client }) => {
           // rest (embeddings, reranking, translation, speech, audio) are
           // one line, not forty sambert voices each with a meter
           const chat = grants.filter((g) => g.media === "text" && chatLikeId(g.model))
-          const served = grants.filter((g) => g.media === "image" || g.media === "video")
+          const served = grants.filter((g) => (g.media === "image" || g.media === "video") && chatLikeId(g.model))
           const mediaNames = { image: "画图", video: "视频" }
           const rest = grants.filter((g) => !chat.includes(g) && !served.includes(g))
           const byMedia = {}
           for (const g of rest) byMedia[g.media] = (byMedia[g.media] ?? 0) + 1
-          const restNames = { speech: "语音", audio: "音频", text: "向量/翻译/实时" }
+          const restNames = { speech: "语音", audio: "音频", text: "向量/翻译/实时", image: "图像（仅翻译）", video: "视频（仅翻译）" }
           const byKind = {}
           for (const g of served) byKind[g.media] = (byKind[g.media] ?? 0) + 1
           return {

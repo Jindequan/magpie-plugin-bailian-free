@@ -665,7 +665,7 @@ test("usage folds non-chat grants into one aside line", async () => {
 
 test("chatLikeId and servable keep endpoints and specialists out", async () => {
   const { chatLikeId } = await import("./catalog.mjs")
-  for (const id of ["qwen3.7-text-embedding-flash", "qwen3.7-text-rerank", "qwen-mt-uni", "qwen3.8-omni-flash-realtime", "qwen-audio-3.1-realtime-plus", "sambert-beth-v1"]) {
+  for (const id of ["qwen3.7-text-embedding-flash", "qwen3.7-text-rerank", "qwen-mt-uni", "qwen-mt-image-2.0", "qwen3.8-omni-flash-realtime", "qwen-audio-3.1-realtime-plus", "sambert-beth-v1"]) {
     expect(chatLikeId(id)).toBe(false)
   }
   for (const id of ["kimi-k3", "qwen3.8-omni-flash", "qwen3.8-max", "deepseek-v4.1-flash"]) {
