@@ -192,3 +192,16 @@ export async function readFreeQuota({ token, site, region, fetch: doFetch = fetc
   const inner = await call(API_FREE_QUOTA, { queryFreeTierQuotaRequest: { models: names } })
   return parseFreeQuota(inner ?? {}, (model) => caps.get(model) ?? [], Date.now())
 }
+
+// verifyConsoleToken says a token can read the free quota: the model list
+// is read without a sign-in (a garbage token lists models fine), so the
+// free-quota query is what a token must survive before a sign-in counts.
+// It throws with .signIn = "expired" when the console refuses the token.
+export async function verifyConsoleToken({ token, site, region, fetch: doFetch = fetch, env = process.env }) {
+  await callConsoleApi({
+    api: API_FREE_QUOTA,
+    data: { queryFreeTierQuotaRequest: { models: ["qwen-plus"] } },
+    token, site, region, fetch: doFetch, env,
+  })
+  return true
+}

@@ -16,6 +16,13 @@ the way Bailian's official CLI does:
 - **百炼 CLI 登录态**: reads `bl login`'s sign-in from
   `~/.bailian/config.json`, read only. Only `bl login` renews it.
 
+A sign-in only counts once its token has actually read the free quota:
+the model list is served without a sign-in (a stale token lists models
+fine), so a refused token — a `bl login` that has gone stale, or one the
+free-quota API won't take — is refused at sign-in with what to do, not
+left to quietly fall back to the bootstrap models. When that happens,
+run `bl login` again and re-sign-in, or use the browser method.
+
 Requests need a **DashScope API key** (`sk-…`, created on the console's
 API-KEY page); the browser sign-in asks for it up front, and bl's own key
 is picked up from its profile when it has one. The quota card lists each

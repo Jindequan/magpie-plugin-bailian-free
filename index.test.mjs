@@ -364,3 +364,70 @@ test("currentCreds re-reads bl's file each time", async () => {
     expect(e.message).toContain("bl login")
   }
 })
+
+// ---- sign-in verifies the token against the free-quota API --------------------
+// The model list is read without a sign-in, so a stale token would sign in
+// "successfully" and then quietly fall back to the bootstrap models.
+
+function writeBLProfile(token) {
+  tempDir ??= mkdtempSync(join(tmpdir(), "bl-"))
+  process.env.BAILIAN_CONFIG_DIR = tempDir
+  writeFileSync(join(tempDir, "config.json"), JSON.stringify({ access_token: token }))
+}
+
+test("bl sign-in refuses a token the free-quota API rejects", async () => {
+  const { url } = startConsole({
+    "zeldaEasy.bailian-commerce.freeTrial.queryFreeTierQuota": () => fixture("not-logged-in.json"),
+  })
+  process.env.BAILIAN_CONSOLE_GATEWAY = url
+  writeBLProfile("stale-tok")
+  const h = await hooks()
+  const flow = await h.auth.methods[1].authorize()
+  const r = await flow.callback()
+  expect(r.type).toBe("failed")
+  expect(r.error).toContain("bl login")
+})
+
+test("bl sign-in succeeds when the console accepts the token", async () => {
+  const { url } = startConsole({
+    "zeldaEasy.bailian-commerce.freeTrial.queryFreeTierQuota": () => fixture("free-quota.json"),
+  })
+  process.env.BAILIAN_CONSOLE_GATEWAY = url
+  writeBLProfile("live-tok")
+  const h = await hooks()
+  const flow = await h.auth.methods[1].authorize()
+  const r = await flow.callback()
+  expect(r.type).toBe("success")
+  expect(r.token).toBe("live-tok")
+  expect(r.source).toBe("bl")
+})
+
+test("browser sign-in verifies the minted token before it counts", async () => {
+  const { url } = startConsole({
+    "zeldaEasy.bailian-commerce.freeTrial.queryFreeTierQuota": () => fixture("not-logged-in.json"),
+  })
+  process.env.BAILIAN_CONSOLE_GATEWAY = url
+  const h = await hooks()
+  const flow = await h.auth.methods[0].authorize({ apiKey: "sk-x" })
+  const ok = await fetch(`http://127.0.0.1:${flow.url.match(/127\.0\.0\.1:(\d+)/)[1]}/?state=${flow.url.split("state=")[1]}&access_token=minted`, { method: "POST", body: "" })
+  expect(ok.status).toBe(200)
+  const r = await flow.callback()
+  expect(r.type).toBe("failed")
+  expect(r.error).toContain("无法读取免费额度")
+})
+
+test("usage says how each source's refused token is renewed", async () => {
+  const { url } = startConsole({
+    "zeldaHttp.dashscopeModel./zelda/api/v1/modelCenter/listFoundationModels": () => fixture("not-logged-in.json"),
+    "zeldaEasy.bailian-commerce.freeTrial.queryFreeTierQuota": () => fixture("not-logged-in.json"),
+  })
+  process.env.BAILIAN_CONSOLE_GATEWAY = url
+  const h = await hooks()
+  const bl = await h.auth.usage(async () => ({ type: "oauth", token: "tok", source: "bl" }))
+  expect(bl.signIn).toBe("expired")
+  expect(bl.error).toContain("bl login")
+  const browser = await h.auth.usage(async () => ({ type: "oauth", token: "tok", source: "browser" }))
+  expect(browser.signIn).toBe("expired")
+  expect(browser.error).not.toContain("bl login")
+  expect(browser.error).toContain("重新登录")
+})

@@ -5,7 +5,7 @@
 // so the plugin signs in the way Bailian's CLI does (a loopback
 // console-login page, or bl's own sign-in, read only).
 
-import { readFreeQuota, signedOutError } from "./console.mjs"
+import { readFreeQuota, verifyConsoleToken, signedOutError } from "./console.mjs"
 import { readBailianCLIProfile } from "./bl.mjs"
 import { startConsoleLogin } from "./login.mjs"
 import { configModels, runtimeModel, grantWindow, freeQuotaNote } from "./models.mjs"
@@ -35,6 +35,14 @@ async function currentCreds(auth) {
     apiKey: String(auth.apiKey ?? "").trim(),
     source: "browser",
   }
+}
+
+// renewHint is how a refused console token is renewed, by where it came
+// from: bl's own sign-in, or the plugin's browser login.
+function renewHint(auth) {
+  return auth?.source === "bl"
+    ? "百炼 CLI 的登录已结束：请重新运行 bl login，然后在本插件里重新登录；或改用浏览器登录"
+    : "阿里云登录已结束，请重新登录"
 }
 
 // grantsCache keeps one read per token, so the console isn't asked again
@@ -151,7 +159,11 @@ export const BailianFreeAuthPlugin = async () => {
             signIn: "kept",
           }
         } catch (e) {
-          return { error: e?.message ?? String(e), signIn: e?.signIn === "expired" ? "expired" : "kept" }
+          // the model list is read without a sign-in, so a refused token
+          // shows up here first; say how this account's token is renewed
+          const error =
+            e?.signIn === "expired" ? signedOutError(renewHint(auth)).message : e?.message ?? String(e)
+          return { error, signIn: e?.signIn === "expired" ? "expired" : "kept" }
         }
       },
       methods: [
@@ -176,6 +188,11 @@ export const BailianFreeAuthPlugin = async () => {
               async callback() {
                 try {
                   const v = await login.done
+                  try {
+                    await verifyConsoleToken({ token: v.token, site: v.site, region: v.region })
+                  } catch (e) {
+                    return { type: "failed", error: `登录态无法读取免费额度（${e?.message ?? e}），请重新发起登录` }
+                  }
                   return {
                     type: "success",
                     access: "",
@@ -207,6 +224,18 @@ export const BailianFreeAuthPlugin = async () => {
               if (!p?.token) {
                 return { type: "failed", error: "未检测到百炼 CLI 登录态（~/.bailian/config.json）。请先运行 bl login。" }
               }
+              // the model list is read without a sign-in, so a stale bl
+              // token still "works" there; only the free-quota query tells
+              // the truth, and a sign-in with it would quietly fall back
+              // to the bootstrap models
+              try {
+                await verifyConsoleToken({ token: p.token, site: p.site, region: p.region })
+              } catch (e) {
+                const why = e?.signIn === "expired"
+                  ? "百炼 CLI 的登录态已无法读取免费额度（可能已过期）。请重新运行 bl login 后再登录；或改用浏览器登录。"
+                  : `无法验证百炼 CLI 的登录态（${e?.message ?? e}）`
+                return { type: "failed", error: why }
+              }
               return {
                 type: "success",
                 access: "",
@@ -230,6 +259,7 @@ export const BailianFreeAuthPlugin = async () => {
 export const _internal = {
   currentCreds,
   readGrants,
+  renewHint,
   resetGrantsCache: () => {
     grantsCache = { token: "", at: 0, value: null }
   },
