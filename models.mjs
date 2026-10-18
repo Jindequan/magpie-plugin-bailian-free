@@ -1,57 +1,48 @@
-// What the plugin offers before the grants are read, and how a grant
-// becomes a model and a quota window. The live list always wins: it is
-// exactly the models whose free quota still has room.
+// What the plugin offers as models, and how a grant becomes a model and
+// a quota window. The bootstrap list is only what shows before the live
+// catalog has been read; its numbers are the catalog's own (2026-10),
+// and the live list always replaces it.
 
 const DASHSCOPE_BASE = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 const NPM = "@ai-sdk/openai-compatible"
 
-// Context and output limits of the models Bailian's new users are granted,
-// from Bailian's docs; anything the grants list beyond this gets a
-// conservative default rather than a wrong number.
-const KNOWN_LIMITS = {
-  "qwen-flash": [1_048_576, 8_192],
-  "qwen-turbo": [1_000_000, 8_192],
-  "qwen-plus": [131_072, 8_192],
-  "qwen-max": [32_768, 8_192],
-  "qwen3-max": [131_072, 8_192],
-  "deepseek-v3": [65_536, 8_192],
-  "deepseek-r1": [65_536, 8_192],
-  "kimi-k3": [131_072, 8_192],
-}
-const DEFAULT_LIMITS = [131_072, 8_192]
+// What a fresh account is most likely granted, from Bailian's own
+// catalog — id, context, output, image input. Only the ids are a choice;
+// every number comes from the catalog.
+const BOOTSTRAP = [
+  ["qwen3.8-max", 1_000_000, 131_072, true],
+  ["qwen3.8-flash", 1_000_000, 131_072, true],
+  ["qwen3.7-max", 1_000_000, 131_072, false],
+  ["qwen3.7-flash", 1_000_000, 131_072, true],
+  ["qwen3.6-flash", 1_000_000, 65_536, true],
+  ["deepseek-v4.1-flash", 1_000_000, 393_216, true],
+  ["deepseek-v4-pro", 1_000_000, 393_216, false],
+  ["kimi-k3", 1_000_000, 1_048_576, true],
+  ["kimi-k2.7-code", 262_144, 16_384, true],
+]
+export const BOOTSTRAP_IDS = BOOTSTRAP.map(([id]) => id)
 
-export const FALLBACK_MODELS = Object.keys(KNOWN_LIMITS).map((id) => ({
-  id,
-  name: id,
-  ...Object.fromEntries(["context", "output"].map((k, i) => [k, KNOWN_LIMITS[id][i]])),
-  images: false,
-  reasoning: true,
-}))
+// FALLBACK_LIMITS is what an unknown id shows until the catalog says
+// better: the smallest context Bailian's chat models have.
+const FALLBACK_LIMITS = [32_768, 8_192]
 
-function limitsOf(id) {
-  const known = KNOWN_LIMITS[id]
-  if (known) return known
-  const bare = id.replace(/-latest$|-thinking$|-chat$/, "")
-  return KNOWN_LIMITS[bare] ?? DEFAULT_LIMITS
-}
-
-export function isReasoning(id) {
-  return /r1|qwq|thinking|qwen3/.test(id)
+function limitsOf(e) {
+  return [e.context > 0 ? e.context : FALLBACK_LIMITS[0], e.output > 0 ? e.output : FALLBACK_LIMITS[1]]
 }
 
 // configModels is the provider's bootstrap list, in OpenCode's config
-// shape.
+// shape. Marked free — a fresh account's grants cover most of them.
 export function configModels() {
   return Object.fromEntries(
-    FALLBACK_MODELS.map((m) => [
-      m.id,
+    BOOTSTRAP.map(([id, context, output, images]) => [
+      id,
       {
-        name: m.name,
-        limit: { context: m.context, output: m.output },
+        name: id,
+        limit: { context, output },
         tool_call: true,
         reasoning: true,
-        attachment: false,
-        modalities: { input: ["text"], output: ["text"] },
+        attachment: images,
+        modalities: { input: images ? ["text", "image"] : ["text"], output: ["text"] },
         free: true,
         rate: 0,
       },
@@ -60,14 +51,17 @@ export function configModels() {
 }
 
 // runtimeModel is one live model in the shape OpenCode's provider.models
-// hook returns. Free grants cost nothing while they last.
-export function runtimeModel(provider, id) {
-  const [context, output] = limitsOf(id)
+// hook returns: the catalog's own limits and abilities, free while a
+// grant has room.
+export function runtimeModel(provider, e, free) {
+  const [context, output] = limitsOf(e)
+  const images = e.request.includes("Image")
+  const audio = e.request.includes("Audio")
   return {
-    id,
+    id: e.id,
     providerID: provider.id,
-    name: id,
-    api: { id, url: DASHSCOPE_BASE, npm: NPM },
+    name: e.id,
+    api: { id: e.id, url: DASHSCOPE_BASE, npm: NPM },
     status: "active",
     headers: {},
     options: {},
@@ -75,17 +69,17 @@ export function runtimeModel(provider, id) {
     limit: { context, output },
     capabilities: {
       temperature: true,
-      reasoning: isReasoning(id),
-      attachment: false,
-      toolcall: true,
-      input: { text: true, image: false, audio: false, video: false, pdf: false },
+      reasoning: !!e.reasoning,
+      attachment: images,
+      toolcall: e.tools !== false,
+      input: { text: true, image: images, audio, video: e.request.includes("Video"), pdf: false },
       output: { text: true, image: false, audio: false, video: false, pdf: false },
       interleaved: false,
     },
     release_date: "",
     variants: {},
-    free: true,
-    rate: 0,
+    free: !!free,
+    ...(free ? { rate: 0 } : {}),
   }
 }
 
@@ -115,9 +109,7 @@ export function grantWindow(grant) {
     amount: grant.limit - grant.left,
     limit: grant.limit,
     unit,
-    ...(grant.ends > 0
-      ? { runsOutAt: new Date(grant.ends).toISOString(), runsOut: grant.left }
-      : {}),
+    ...(grant.ends > 0 ? { runsOutAt: new Date(grant.ends).toISOString(), runsOut: grant.left } : {}),
   }
 }
 

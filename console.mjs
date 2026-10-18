@@ -29,24 +29,28 @@ export function signedOutError(why) {
 
 // callConsoleApi is one console call through the CLI gateway. It returns
 // the call's own data, or null when the gateway says none. A refused
-// token throws with .signIn = "expired".
+// token throws with .signIn = "expired". The gateway now and then drops
+// a connection for no reason it explains — a network failure is retried
+// twice before it becomes an error; a vendor's answer never is.
 export async function callConsoleApi({ api, data = {}, token, site, region, fetch: doFetch = fetch, env = process.env }) {
   const params = JSON.stringify({ Api: api, V: "1.0", Data: { ...data, cornerstoneParam: CORNERSTONE } })
   const form = new URLSearchParams({ params, region: region || "cn-beijing" })
+  const url = `${gatewayHost(site, env)}/cli/api.json?action=BroadScopeAspnGateway&product=sfm_bailian&api=${encodeURIComponent(api)}`
+  const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/x-www-form-urlencoded", Accept: "*/*" }
+  const body = form.toString()
   let res
-  try {
-    res = await doFetch(
-      `${gatewayHost(site, env)}/cli/api.json?action=BroadScopeAspnGateway&product=sfm_bailian&api=${encodeURIComponent(api)}`,
-      {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/x-www-form-urlencoded", Accept: "*/*" },
-        body: form.toString(),
-        signal: AbortSignal.timeout(30_000),
-      },
-    )
-  } catch (e) {
-    throw new Error(`连不上百炼：${e?.message ?? e}`)
+  let lastError
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      res = await doFetch(url, { method: "POST", headers, body, signal: AbortSignal.timeout(30_000) })
+      lastError = null
+      break
+    } catch (e) {
+      lastError = e
+      if (attempt < 2) await new Promise((r) => setTimeout(r, 400 * (attempt + 1)))
+    }
   }
+  if (lastError) throw new Error(`连不上百炼：${lastError?.message ?? lastError}`)
   if (res.status === 401 || res.status === 403) {
     throw signedOutError("阿里云登录已结束，请重新登录")
   }
@@ -136,6 +140,7 @@ export function mediaOf(capabilities, model) {
     if (c === "TTS" || c === "SS") return "speech"
     if (c === "ASR" || c === "SR") return "audio"
   }
+  if (/image|wanx|seedream|kolors|flux/i.test(model)) return "image"
   if (/video|wan2|t2v|i2v/i.test(model)) return "video"
   if (/tts|cosyvoice|sambert/i.test(model)) return "speech"
   if (/asr|paraformer|sensevoice/i.test(model)) return "audio"

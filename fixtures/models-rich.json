@@ -1,0 +1,21 @@
+{"code":"200","data":{"DataV2":{"data":{"success":true,"data":{"total":6,"list":[
+  {"model":"group-qwen3.8-max","group":true,"capabilities":["Reasoning","VU","TG"],"maxContextWindow":1000000,"minContextWindow":1000000,"categories":["Flagship"],"provider":"qwen","items":[
+    {"model":"qwen3.8-max","provider":"qwen","capabilities":["Reasoning","VU","TG"],"categories":["Flagship"],
+     "features":["cache","function-calling","structured-outputs","web-search"],
+     "modelInfo":{"contextWindow":1000000,"maxInputTokens":991808,"maxOutputTokens":131072,"maxReasoningTokens":262144},
+     "inferenceMetadata":{"request_modality":["Image","Text","Video"],"response_modality":["Text"]}}]},
+  {"model":"kimi-k3","provider":"moonshot","capabilities":["Reasoning","TG"],
+   "features":["function-calling"],
+   "modelInfo":{"contextWindow":1000000,"maxOutputTokens":1048576,"maxReasoningTokens":262144},
+   "inferenceMetadata":{"request_modality":["Image","Text"],"response_modality":["Text"]}},
+  {"model":"qwen3.8-omni-flash-realtime","provider":"qwen","capabilities":["TG"],
+   "features":["function-calling"],
+   "modelInfo":{"contextWindow":262144,"maxOutputTokens":65536},
+   "inferenceMetadata":{"request_modality":["Text","Image","Audio","Video"],"response_modality":["Text"]}},
+  {"model":"qwen-audio-3.1-asr-flash","provider":"qwen","capabilities":["ASR"],
+   "inferenceMetadata":{"request_modality":["Audio"],"response_modality":["Text"]}},
+  {"model":"z-image-turbo","provider":"qwen","capabilities":["IG"],
+   "inferenceMetadata":{"request_modality":["Text"],"response_modality":["Text"]}},
+  {"model":"old-model","provider":"qwen","capabilities":["TG"],
+   "inferenceMetadata":{"request_modality":["Text"],"response_modality":["Text"]}}
+]}}},"success":true}}

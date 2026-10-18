@@ -6,9 +6,10 @@
 // console-login page, or bl's own sign-in, read only).
 
 import { readFreeQuota, verifyConsoleToken, signedOutError } from "./console.mjs"
+import { fetchModelCatalog, servable } from "./catalog.mjs"
 import { readBailianCLIProfile } from "./bl.mjs"
 import { startConsoleLogin } from "./login.mjs"
-import { configModels, runtimeModel, grantWindow, freeQuotaNote } from "./models.mjs"
+import { configModels, runtimeModel, grantWindow, freeQuotaNote, BOOTSTRAP_IDS } from "./models.mjs"
 
 const PROVIDER_ID = "bailian-free"
 const PROVIDER_NAME = "百炼免费额度"
@@ -83,17 +84,46 @@ export const BailianFreeAuthPlugin = async () => {
     provider: {
       id: PROVIDER_ID,
       async models(provider, { auth } = {}) {
+        // a grant the catalog doesn't know (a model too new for the
+        // list, or removed from it) is still offered, at fallback limits
+        const synthetic = (id) => ({
+          id, context: 0, output: 0, request: ["Text"], response: ["Text"], caps: ["TG"],
+          provider: "", categories: [], tools: undefined, reasoning: false,
+        })
         try {
-          const creds = await currentCreds(auth)
-          if (!creds?.token) return provider.models
-          const { grants } = await readGrants(creds)
-          const live = {}
-          for (const grant of grants) {
-            if (grant.media !== "text") continue
-            live[grant.model] = runtimeModel(provider, grant.model)
+          let creds = null
+          try {
+            creds = await currentCreds(auth)
+          } catch {}
+          // the catalog is public: real ids, real limits and abilities,
+          // with no sign-in at all
+          const catalog = await fetchModelCatalog({ token: creds?.token || "public", site: creds?.site, region: creds?.region })
+          let grants = null
+          if (creds?.token) {
+            try {
+              grants = (await readGrants(creds)).grants
+            } catch {}
           }
-          return Object.keys(live).length ? live : provider.models
+          if (grants) {
+            const live = {}
+            for (const g of grants) {
+              if (g.media !== "text") continue
+              live[g.model] = runtimeModel(provider, catalog.get(g.model) ?? synthetic(g.model), true)
+            }
+            if (Object.keys(live).length) return live
+            // the grants read fine but nothing has room left: what the
+            // bootstrap covers stays offerable, no longer marked free
+          }
+          // not signed in, or nothing left: the catalog's own view of
+          // what a fresh account gets, numbers and all
+          const out = {}
+          for (const id of BOOTSTRAP_IDS) {
+            const e = catalog.get(id)
+            if (e && servable(e)) out[id] = runtimeModel(provider, e, false)
+          }
+          return Object.keys(out).length ? out : provider.models
         } catch {
+          // the console can't be read at all: the bootstrap list stands in
           return provider.models
         }
       },

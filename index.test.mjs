@@ -34,6 +34,7 @@ afterEach(() => {
   delete process.env.BAILIAN_CONSOLE_GATEWAY
   delete process.env.BAILIAN_CONFIG_DIR
   _internal.resetGrantsCache()
+  resetCatalogCache()
 })
 
 // A fake console gateway that serves the wire fixtures the way the real
@@ -283,7 +284,7 @@ test("config declares the provider with models; auth has two sign-ins", async ()
   expect(p.npm).toBe("@ai-sdk/openai-compatible")
   expect(p.api).toBe("https://dashscope.aliyuncs.com/compatible-mode/v1")
   expect(Object.keys(p.models).length).toBeGreaterThan(0)
-  expect(configModels()["qwen-flash"].free).toBe(true)
+  expect(configModels()["kimi-k3"].free).toBe(true)
 
   expect(h.auth.provider).toBe("bailian-free")
   expect(h.auth.methods.length).toBe(2)
@@ -308,16 +309,17 @@ test("usage lists the grants as windows from the console", async () => {
   expect(usage.windows[0].display).toBe("82万 / 100万 tokens")
 })
 
-test("usage without a sign-in says so; provider.models falls back", async () => {
+test("usage without a sign-in says so; provider.models stands in when the console can't be read", async () => {
   const h = await hooks()
   const none = await h.auth.usage(async () => ({ type: "oauth" }))
   expect(none.error).toBe("not signed in")
 
+  // no gateway override and no cached catalog: the bootstrap config list stands in
   const models = await h.provider.models(
     { id: "bailian-free", models: configModels() },
     { auth: { type: "oauth" } },
   )
-  expect(Object.keys(models)).toContain("qwen-flash")
+  expect(Object.keys(models)).toContain("kimi-k3")
 })
 
 test("loader sends with the DashScope key and says what is missing", async () => {
@@ -430,4 +432,115 @@ test("usage says how each source's refused token is renewed", async () => {
   expect(browser.signIn).toBe("expired")
   expect(browser.error).not.toContain("bl login")
   expect(browser.error).toContain("重新登录")
+})
+
+// ---- the public catalog drives the model list ---------------------------------
+
+import { pageModels, servable, resetCatalogCache } from "./catalog.mjs"
+import { runtimeModel } from "./models.mjs"
+
+test("pageModels takes a group's items, never the group id, and keeps the metadata", () => {
+  const inner = unwrapCliReply(fixture("models-rich.json"))
+  const { total, models } = pageModels(inner)
+  expect(total).toBe(6)
+  const ids = models.map((m) => m.id)
+  expect(ids).toContain("qwen3.8-max")
+  expect(ids).not.toContain("group-qwen3.8-max")
+  expect(ids).toContain("kimi-k3")
+
+  const byId = Object.fromEntries(models.map((m) => [m.id, m]))
+  const max = byId["qwen3.8-max"]
+  expect(max.context).toBe(1_000_000)
+  expect(max.output).toBe(131_072)
+  expect(max.tools).toBe(true)
+  expect(max.reasoning).toBe(true)
+  expect(max.request).toEqual(["Image", "Text", "Video"])
+
+  // servable: chat only — no transcription, no image maker, no realtime
+  expect(servable(max)).toBe(true)
+  expect(servable(byId["kimi-k3"])).toBe(true)
+  expect(servable(byId["qwen-audio-3.1-asr-flash"])).toBe(false)
+  expect(servable(byId["z-image-turbo"])).toBe(false)
+  expect(servable(byId["qwen3.8-omni-flash-realtime"])).toBe(false)
+  expect(servable(byId["old-model"])).toBe(true)
+})
+
+test("runtimeModel carries the catalog's own limits, abilities and free mark", () => {
+  const inner = unwrapCliReply(fixture("models-rich.json"))
+  const kimi = pageModels(inner).models.find((m) => m.id === "kimi-k3")
+  const m = runtimeModel({ id: "bailian-free" }, kimi, true)
+  expect(m.limit).toEqual({ context: 1_000_000, output: 1_048_576 })
+  expect(m.capabilities.attachment).toBe(true) // Image in the request
+  expect(m.capabilities.toolcall).toBe(true)
+  expect(m.capabilities.reasoning).toBe(true)
+  expect(m.free).toBe(true)
+  expect(m.rate).toBe(0)
+  const paid = runtimeModel({ id: "bailian-free" }, kimi, false)
+  expect(paid.free).toBe(false)
+  expect(paid.rate).toBeUndefined()
+})
+
+function startRichConsole(extra = {}) {
+  return startConsole({
+    "zeldaHttp.dashscopeModel./zelda/api/v1/modelCenter/listFoundationModels": (params) =>
+      params.Data.input.pageNo === 1 ? fixture("models-rich.json") : JSON.stringify({ code: "200", data: { DataV2: { data: { success: true, data: { total: 6, list: [] } } }, success: true } }),
+    "zeldaEasy.bailian-commerce.freeTrial.queryFreeTierQuota": () => fixture("free-quota.json"),
+    ...extra,
+  })
+}
+
+test("provider.models without a sign-in offers the catalog's own bootstrap models", async () => {
+  resetCatalogCache()
+  const { url } = startRichConsole()
+  process.env.BAILIAN_CONSOLE_GATEWAY = url
+  const h = await hooks()
+  const models = await h.provider.models({ id: "bailian-free", models: configModels() }, { auth: { type: "oauth" } })
+  const ids = Object.keys(models)
+  expect(ids).toEqual(["qwen3.8-max", "kimi-k3"]) // the bootstrap ids the rich catalog has
+  expect(models["kimi-k3"].limit.output).toBe(1_048_576) // the catalog's number, not a guess
+  expect(models["kimi-k3"].free).toBe(false) // not signed in: nothing is promised free
+})
+
+test("provider.models signed in is exactly the grants with room, at catalog limits", async () => {
+  resetCatalogCache()
+  _internal.resetGrantsCache()
+  const { url } = startRichConsole()
+  process.env.BAILIAN_CONSOLE_GATEWAY = url
+  const h = await hooks()
+  const models = await h.provider.models(
+    { id: "bailian-free", models: configModels() },
+    { auth: { type: "oauth", token: "tok", source: "browser" } },
+  )
+  expect(Object.keys(models)).toEqual(["kimi-k3"]) // the image grant is not a chat model
+  expect(models["kimi-k3"].free).toBe(true)
+  expect(models["kimi-k3"].limit.output).toBe(1_048_576)
+})
+
+test("callConsoleApi retries a network failure twice before giving up", async () => {
+  const { callConsoleApi } = await import("./console.mjs")
+  let failures = 0
+  const flaky = async () => {
+    failures++
+    if (failures <= 2) throw new Error("connection dropped")
+    return new Response(fixture("not-logged-in.json"), { status: 200, headers: { "Content-Type": "application/json" } })
+  }
+  try {
+    await callConsoleApi({ api: "x", token: "t", fetch: flaky })
+    throw new Error("should have thrown the vendor's refusal")
+  } catch (e) {
+    expect(failures).toBe(3) // two drops retried, the third reached the console
+    expect(e.signIn).toBe("expired") // a vendor answer is never retried into something else
+  }
+  failures = 0
+  const dead = async () => {
+    failures++
+    throw new Error("connection dropped")
+  }
+  try {
+    await callConsoleApi({ api: "x", token: "t", fetch: dead })
+    throw new Error("should have thrown")
+  } catch (e) {
+    expect(failures).toBe(3)
+    expect(e.message).toContain("连不上百炼")
+  }
 })

@@ -30,6 +30,17 @@ model's grant, what is left of it and when it ends, and the free grants
 feed magpie's per-model allowance, so free quota is spent before anything
 paid.
 
+Models are never guessed. Bailian's own model catalog — public, no
+sign-in needed — carries each model's real context and output limits,
+request and response modalities, and features (function calling,
+reasoning): the plugin reads it live (with a retry, for a gateway that
+now and then drops a connection) and builds every model entry from it.
+Signed in, the list is exactly the models whose free grant still has
+room, marked free; not signed in (or with nothing left), it is the
+catalog's own view of what a fresh account gets, with the catalog's
+numbers, marked not free. Image, video, speech and realtime endpoints
+are never offered as chat models; their grants still show on the card.
+
 ## Install
 
 No npm; magpie installs straight from this git repository. Any one of
