@@ -22,6 +22,21 @@ const BOOTSTRAP = [
 ]
 export const BOOTSTRAP_IDS = BOOTSTRAP.map(([id]) => id)
 
+// What a fresh account is granted that is not chat, from the same
+// catalog: image models that draw and video models that film. The
+// config-time list is where magpie's Drawers and customVideomakers look
+// (models.go: a plugin's provider has no live fetch), so these are
+// declared here as they are; the signed-in list stays the truth about
+// what an account's grants still have room for.
+const BOOTSTRAP_MEDIA = [
+  ["qwen-image-3.0", "image"],
+  ["qwen-image-3.0-pro", "image"],
+  ["qwen-image-2.1-pro", "image"],
+  ["qwen-image-2.1-turbo", "image"],
+  ["wan3.0-video", "video"],
+  ["wan3.0-video-prime", "video"],
+]
+
 // FALLBACK_LIMITS is what an unknown id shows until the catalog says
 // better: the smallest context Bailian's chat models have.
 const FALLBACK_LIMITS = [32_768, 8_192]
@@ -31,9 +46,11 @@ function limitsOf(e) {
 }
 
 // configModels is the provider's bootstrap list, in OpenCode's config
-// shape. Marked free — a fresh account's grants cover most of them.
+// shape. Marked free — a fresh account's grants cover most of them. The
+// image and video entries carry their kind in modalities.output, which is
+// what routes them to the images and videos APIs.
 export function configModels() {
-  return Object.fromEntries(
+  const chat = Object.fromEntries(
     BOOTSTRAP.map(([id, context, output, images]) => [
       id,
       {
@@ -48,6 +65,22 @@ export function configModels() {
       },
     ]),
   )
+  const media = Object.fromEntries(
+    BOOTSTRAP_MEDIA.map(([id, kind]) => [
+      id,
+      {
+        name: id,
+        limit: { context: 0, output: 0 },
+        tool_call: false,
+        reasoning: false,
+        attachment: false,
+        modalities: { input: ["text"], output: [kind] },
+        free: true,
+        rate: 0,
+      },
+    ]),
+  )
+  return { ...chat, ...media }
 }
 
 // runtimeModel is one live model in the shape OpenCode's provider.models
